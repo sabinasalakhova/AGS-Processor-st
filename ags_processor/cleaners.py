@@ -1,183 +1,53 @@
 """
-Data Cleaning and Utility Functions
+Data Cleaning Module
 
-Comprehensive data cleaning functions from legacy agsfileanalysis.
-Includes column normalization, row expansion, deduplication, and group combination.
+Re-exports functions directly from legacy/agsfileanalysis/cleaners.py
+No duplication - uses original implementations.
 """
 
-import pandas as pd
-import numpy as np
-from typing import List, Tuple, Dict
+import sys
+from pathlib import Path
 
+# Add legacy directory to path
+legacy_path = Path(__file__).parent.parent / "legacy" / "agsfileanalysis"
+if str(legacy_path) not in sys.path:
+    sys.path.insert(0, str(legacy_path))
 
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize column names to uppercase and strip whitespace.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input dataframe
-    
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with normalized columns
-    """
-    df.columns = [col.upper().strip() for col in df.columns]
-    return df
+# Import all functions from legacy cleaners.py
+try:
+    from cleaners import (
+        normalize_columns,
+        drop_singleton_rows,
+        deduplicate_cell,
+        expand_rows,
+        combine_groups,
+        coalesce_columns,
+        to_numeric_safe
+    )
+except ImportError as e:
+    print(f"Warning: Could not import from legacy cleaners: {e}")
+    # Define stub functions if legacy not available
+    def normalize_columns(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
+    def drop_singleton_rows(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
+    def deduplicate_cell(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
+    def expand_rows(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
+    def combine_groups(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
+    def coalesce_columns(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
+    def to_numeric_safe(*args, **kwargs):
+        raise NotImplementedError("Legacy cleaners module not found")
 
-
-def drop_singleton_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Drop rows with only 0 or 1 non-null values.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input dataframe
-    
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with singleton rows removed
-    """
-    if df.empty:
-        return df
-    # Treat empty strings and whitespace as NaN
-    with pd.option_context('future.no_silent_downcasting', True):
-        clean = df.replace(r"^\s*$", np.nan, regex=True).infer_objects(copy=False)
-    nn = clean.notna().sum(axis=1)
-    return df.loc[nn > 1].reset_index(drop=True)
-
-
-def deduplicate_cell(cell):
-    """
-    Deduplicate pipe-separated values within a cell.
-    
-    Parameters
-    ----------
-    cell : any
-        Cell value to deduplicate
-    
-    Returns
-    -------
-    any
-        Deduplicated cell value
-    """
-    if pd.isna(cell):
-        return cell
-    parts = [p.strip() for p in str(cell).split(" | ")]
-    unique_parts = []
-    for p in parts:
-        if p and p not in unique_parts:
-            unique_parts.append(p)
-    return " | ".join(unique_parts)
-
-
-def expand_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Expand rows where any cell contains ' | ' separated values,
-    but skip expansion if all split values across columns are identical.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input dataframe
-    
-    Returns
-    -------
-    pd.DataFrame
-        Expanded dataframe
-    """
-    expanded_rows = []
-
-    for _, row in df.iterrows():
-        split_values = {
-            col: (str(row[col]).split(" | ") if pd.notna(row[col]) else [""])
-            for col in df.columns
-        }
-
-        # Check if all columns have the same repeated value
-        all_same = all(
-            len(set(values)) == 1 for values in split_values.values()
-        )
-
-        if all_same and all(len(values) > 1 for values in split_values.values()):
-            # If all values are the same and repeated, keep as single row
-            new_row = {col: split_values[col][0] for col in df.columns}
-            expanded_rows.append(new_row)
-        else:
-            # Expand into multiple rows
-            max_len = max(len(v) for v in split_values.values()) if split_values else 1
-            for i in range(max_len):
-                new_row = {
-                    col: (split_values[col][i] if i < len(split_values[col]) else "")
-                    for col in df.columns
-                }
-                expanded_rows.append(new_row)
-
-    return pd.DataFrame(expanded_rows) 
-
-
-def combine_groups(all_group_dfs: List[Tuple[str, Dict[str, pd.DataFrame]]]) -> Dict[str, pd.DataFrame]:
-    """
-    Combine groups across files. Adds SOURCE_FILE column.
-    
-    Parameters
-    ----------
-    all_group_dfs : List[Tuple[str, Dict[str, pd.DataFrame]]]
-        List of tuples (filename, group_dict)
-    
-    Returns
-    -------
-    Dict[str, pd.DataFrame]
-        Dictionary of combined DataFrames by group name
-    """
-    combined: Dict[str, List[pd.DataFrame]] = {}
-    for fname, gdict in all_group_dfs:
-        for gname, df in gdict.items():
-            if df is None or df.empty:
-                continue
-            temp = df.copy()
-            temp["SOURCE_FILE"] = fname
-            combined.setdefault(gname, []).append(temp)
-    return {g: drop_singleton_rows(pd.concat(dfs, ignore_index=True)) for g, dfs in combined.items()}
-    
-
-def coalesce_columns(df: pd.DataFrame, candidates: List[str], new_name: str):
-    """
-    Create/rename a single column 'new_name' from the first existing candidate.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame to modify (modified in place)
-    candidates : List[str]
-        List of candidate column names
-    new_name : str
-        Target column name
-    """
-    for c in candidates:
-        if c in df.columns:
-            df[new_name] = df[c]
-            return
-    # ensure column exists
-    if new_name not in df.columns:
-        df[new_name] = np.nan
-
-
-def to_numeric_safe(df: pd.DataFrame, cols: List[str]):
-    """
-    Convert columns to numeric, coercing errors to NaN.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame to modify (modified in place)
-    cols : List[str]
-        List of column names to convert
-    """
-    for c in cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+__all__ = [
+    'normalize_columns',
+    'drop_singleton_rows',
+    'deduplicate_cell',
+    'expand_rows',
+    'combine_groups',
+    'coalesce_columns',
+    'to_numeric_safe'
+]
