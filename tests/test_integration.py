@@ -1,6 +1,7 @@
 """Integration tests for AGS Processor."""
 
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +21,6 @@ class TestIntegration(unittest.TestCase):
         
     def tearDown(self):
         """Clean up test fixtures."""
-        import shutil
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
             

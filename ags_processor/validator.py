@@ -44,10 +44,12 @@ class AGSValidator:
         
         if AGS4 is None:
             results['valid'] = False
-            results['errors'].append({
+            error_dict = {
                 'type': 'DEPENDENCY_ERROR',
                 'message': 'python-ags4 library not available'
-            })
+            }
+            results['errors'].append(error_dict)
+            self.validation_errors.append(error_dict)
             return results
             
         try:
@@ -58,23 +60,29 @@ class AGSValidator:
                 for error in error_list:
                     # Categorize errors and warnings
                     if 'error' in error.lower() or 'invalid' in error.lower():
-                        results['errors'].append({
+                        error_dict = {
                             'type': 'FORMAT_ERROR',
                             'message': error
-                        })
+                        }
+                        results['errors'].append(error_dict)
+                        self.validation_errors.append(error_dict)
                         results['valid'] = False
                     else:
-                        results['warnings'].append({
+                        warning_dict = {
                             'type': 'FORMAT_WARNING',
                             'message': error
-                        })
+                        }
+                        results['warnings'].append(warning_dict)
+                        self.validation_warnings.append(warning_dict)
                         
         except Exception as e:
             results['valid'] = False
-            results['errors'].append({
+            error_dict = {
                 'type': 'VALIDATION_ERROR',
                 'message': f'Validation failed: {str(e)}'
-            })
+            }
+            results['errors'].append(error_dict)
+            self.validation_errors.append(error_dict)
             
         return results
         

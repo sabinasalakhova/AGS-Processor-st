@@ -134,3 +134,8 @@ output/
 *.xlsx
 *.xls
 test_output/
+
+# Exclude example output files but keep example AGS files
+data/examples/*.xlsx
+data/examples/*.xls
+data/examples/output/

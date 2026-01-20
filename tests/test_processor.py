@@ -1,6 +1,7 @@
 """Tests for AGS Processor."""
 
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +20,6 @@ class TestAGSProcessor(unittest.TestCase):
     def tearDown(self):
         """Clean up test fixtures."""
         # Clean up temp directory
-        import shutil
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
             
@@ -91,7 +91,6 @@ class TestAGSExporter(unittest.TestCase):
         
     def tearDown(self):
         """Clean up test fixtures."""
-        import shutil
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
             

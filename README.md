@@ -11,6 +11,7 @@ A comprehensive Python tool for processing AGS3 and AGS4 geotechnical data files
 - **Data Consolidation**: Merge data from multiple AGS files into a single output
 - **Error Handling**: Skip invalid files and continue processing
 - **Command-Line Interface**: Easy-to-use CLI for automation
+- **Example Files**: Sample AGS files included for testing
 
 ## Installation
 
@@ -165,28 +166,35 @@ optional arguments:
 
 ## Examples
 
-### Example 1: Basic Processing
+### Example 1: Process Sample File
+
+```bash
+# Try with the included sample file
+ags-processor data/examples/sample_borehole.ags -o output.xlsx -v
+```
+
+### Example 2: Basic Processing
 
 ```bash
 # Process a single AGS file with verbose output
 ags-processor borehole_data.ags -o output.xlsx -v
 ```
 
-### Example 2: Batch Processing
+### Example 3: Batch Processing
 
 ```bash
 # Process all AGS files in a directory
 ags-processor data/*.ags -o consolidated_output.xlsx
 ```
 
-### Example 3: Validation Only
+### Example 4: Validation Only
 
 ```bash
 # Validate files without exporting
 ags-processor *.ags --validate-only -v
 ```
 
-### Example 4: Python Script
+### Example 5: Python Script
 
 ```python
 from ags_processor import AGSProcessor, AGSExporter
@@ -208,6 +216,17 @@ tables = processor.get_all_tables()
 exporter = AGSExporter()
 exporter.export_to_excel(tables, 'consolidated.xlsx')
 ```
+
+## Example Files
+
+Sample AGS files are included in the `data/examples/` directory:
+- `sample_borehole.ags` - A programmatically generated AGS4 file with borehole data
+
+Additional example files can be obtained from:
+- **AGS Official Website**: https://www.ags.org.uk/data-format/
+- **Referenced repositories**: sabinasalakhova/ags3_all_data_to_excel (contains AGS3 examples)
+
+See `data/examples/README.md` for more information on obtaining and using example files.
 
 ## Contributing
 

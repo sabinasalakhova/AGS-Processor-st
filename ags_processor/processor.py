@@ -8,7 +8,7 @@ try:
     from python_ags4 import AGS4
 except ImportError:
     raise ImportError(
-        "python-ags4 is required but not installed. "
+        "python_ags4 is required but not installed. "
         "Please install it with: pip install python-ags4"
     )
 
