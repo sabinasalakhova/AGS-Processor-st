@@ -46,16 +46,17 @@ except ImportError as e:
 
 
 # ============================================================================
-# AGS PROCESSOR CLASS
+# AGS PROCESSOR CLASS - Thin wrapper using legacy functions directly
 # ============================================================================
 
 class AGSProcessor:
     """
     Main AGS file processor class that provides a unified interface for
-    parsing and managing AGS files.
+    parsing and managing AGS files using legacy parsing functions.
     
-    This class wraps the legacy parsing functions and provides a stateful
-    interface for processing multiple files and tracking results.
+    Uses legacy functions directly:
+    - parse_ags_file() from ags_3_reader.py for AGS3 files
+    - AGS4_to_dataframe() from ags_core.py for AGS4 files
     """
     
     def __init__(self):
@@ -72,14 +73,14 @@ class AGSProcessor:
         self.errors = {}
         self.processed_files = []
         
-    def read_file(self, filepath: str, prefix_hole_id: bool = False) -> Dict[str, pd.DataFrame]:
+    def read_file(self, filepath, prefix_hole_id: bool = False) -> Dict[str, pd.DataFrame]:
         """
-        Read a single AGS file using legacy parser.
+        Read a single AGS file using legacy parsers.
         
         Parameters
         ----------
-        filepath : str
-            Path to the AGS file
+        filepath : str or file-like
+            Path to the AGS file or file-like object
         prefix_hole_id : bool, optional
             Whether to prefix HOLE_ID with first 5 chars of filename
             
@@ -89,19 +90,36 @@ class AGSProcessor:
             Dictionary of group name -> DataFrame
         """
         try:
-            # Read file as bytes for parse_ags_file
-            with open(filepath, 'rb') as f:
-                file_bytes = f.read()
+            filename = Path(filepath).name if hasattr(filepath, '__fspath__') or isinstance(filepath, str) else 'uploaded_file'
             
-            # Use the legacy parser
-            groups = parse_ags_file(file_bytes)
+            # Try AGS4_to_dataframe first (handles both AGS3 and AGS4)
+            try:
+                df_dict, headings = AGS4_to_dataframe(filepath)
+                groups = df_dict
+            except Exception as e1:
+                # Fallback to parse_ags_file for AGS3
+                try:
+                    # Read as bytes if filepath
+                    if isinstance(filepath, (str, Path)):
+                        with open(filepath, 'rb') as f:
+                            file_bytes = f.read()
+                    elif hasattr(filepath, 'read'):
+                        file_bytes = filepath.read()
+                        if isinstance(file_bytes, str):
+                            file_bytes = file_bytes.encode('utf-8')
+                    else:
+                        raise ValueError(f"Invalid filepath type: {type(filepath)}")
+                    
+                    groups = parse_ags_file(file_bytes)
+                except Exception as e2:
+                    raise Exception(f"Both parsers failed. AGS4_to_dataframe: {e1}, parse_ags_file: {e2}")
             
             # Store the data
-            filename = Path(filepath).name
             self.file_data[filename] = groups
-            self.processed_files.append(filename)
+            if filename not in self.processed_files:
+                self.processed_files.append(filename)
             
-            # Merge into tables
+            # Merge into consolidated tables
             for group_name, df in groups.items():
                 if group_name in self.tables:
                     # Concatenate with existing data
@@ -115,18 +133,19 @@ class AGSProcessor:
             return groups
             
         except Exception as e:
-            self.errors[filepath] = [str(e)]
-            logger.error(f"Error reading {filepath}: {e}")
+            filepath_str = str(filepath) if isinstance(filepath, (str, Path)) else 'file'
+            self.errors[filepath_str] = [str(e)]
+            logger.error(f"Error reading {filepath_str}: {e}")
             return {}
             
-    def read_multiple_files(self, filepaths: List[str], skip_invalid: bool = True) -> Dict[str, Dict[str, pd.DataFrame]]:
+    def read_multiple_files(self, filepaths: List, skip_invalid: bool = True) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
         Read multiple AGS files.
         
         Parameters
         ----------
-        filepaths : list of str
-            List of paths to AGS files
+        filepaths : list
+            List of file paths or file-like objects
         skip_invalid : bool, optional
             Whether to skip files that fail to parse
             
@@ -141,12 +160,14 @@ class AGSProcessor:
             try:
                 groups = self.read_file(filepath)
                 if groups:
-                    results[Path(filepath).name] = groups
+                    filename = Path(filepath).name if isinstance(filepath, (str, Path)) else 'uploaded_file'
+                    results[filename] = groups
             except Exception as e:
                 if not skip_invalid:
                     raise
-                self.errors[filepath] = [str(e)]
-                logger.warning(f"Skipped {filepath}: {e}")
+                filepath_str = str(filepath) if isinstance(filepath, (str, Path)) else 'file'
+                self.errors[filepath_str] = [str(e)]
+                logger.warning(f"Skipped {filepath_str}: {e}")
                 
         return results
         
