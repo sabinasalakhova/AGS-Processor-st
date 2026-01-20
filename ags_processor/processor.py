@@ -244,9 +244,11 @@ class AGSProcessor:
         
         return df_dict, warnings
     
-    def _parse_ags3_with_validation(self, file_bytes):
+    def _parse_ags3_with_validation(self, file_bytes, filename):
         """
-        Parse AGS3 file and validate row/heading consistency.
+        Parse AGS3 file with row padding and unit row skipping.
+        
+        Skips <UNITS> rows and pads data rows to match heading count.
         
         Returns
         -------
@@ -259,7 +261,9 @@ class AGSProcessor:
         
         current_group = None
         headings = []
+        groups = {}
         line_num = 0
+        group_data = []
         
         import re
         def _split_line(line: str):
