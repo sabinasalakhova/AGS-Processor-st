@@ -67,6 +67,8 @@ class AGSProcessor:
         self.file_data = {}
         self.errors = {}
         self.processed_files = []
+        self.file_versions = {}  # Track AGS version for each file
+        self.skip_mismatched_rows = False  # Default: pad rows instead of skipping
         
     def clear(self):
         """Clear all processed data."""
@@ -75,7 +77,7 @@ class AGSProcessor:
         self.errors = {}
         self.processed_files = []
         
-    def read_file(self, filepath, prefix_hole_id: bool = False) -> Dict[str, pd.DataFrame]:
+    def read_file(self, filepath, prefix_hole_id: bool = False, skip_mismatched_rows: bool = None) -> Dict[str, pd.DataFrame]:
         """
         Read a single AGS file using legacy parsers with enhanced validation.
         
@@ -85,25 +87,27 @@ class AGSProcessor:
             Path to the AGS file or file-like object
         prefix_hole_id : bool, optional
             Whether to prefix HOLE_ID with first 5 chars of filename
+        skip_mismatched_rows : bool, optional
+            If True, skip rows with mismatched column counts (default: True)
             
         Returns
         -------
         dict
             Dictionary of group name -> DataFrame
         """
+        if skip_mismatched_rows is not None:
+            self.skip_mismatched_rows = skip_mismatched_rows
         try:
             filename = Path(filepath).name if hasattr(filepath, '__fspath__') or isinstance(filepath, str) else 'uploaded_file'
             file_warnings = []
             
-            # Try AGS4_to_dataframe first (handles both AGS3 and AGS4)
-            try:
-                # Wrap the call to validate row/heading mismatches
-                groups, parse_warnings = self._parse_with_validation(filepath, 'AGS4_to_dataframe')
-                file_warnings.extend(parse_warnings)
-            except Exception as e1:
-                # Fallback to parse_ags_file for AGS3
+            # Detect AGS version first
+            ags_version = self._detect_ags_version(filepath)
+            
+            # Use appropriate parser based on version
+            if ags_version == 'AGS3':
+                # Use parse_ags_file for AGS3
                 try:
-                    # Read as bytes if filepath
                     if isinstance(filepath, (str, Path)):
                         with open(filepath, 'rb') as f:
                             file_bytes = f.read()
@@ -114,10 +118,17 @@ class AGSProcessor:
                     else:
                         raise ValueError(f"Invalid filepath type: {type(filepath)}")
                     
-                    groups, parse_warnings = self._parse_ags3_with_validation(file_bytes)
+                    groups, parse_warnings = self._parse_ags3_with_validation(file_bytes, filename)
                     file_warnings.extend(parse_warnings)
-                except Exception as e2:
-                    raise Exception(f"Both parsers failed. AGS4_to_dataframe: {e1}, parse_ags_file: {e2}")
+                except Exception as e:
+                    raise Exception(f"AGS3 parser failed: {e}")
+            else:
+                # Use AGS4_to_dataframe for AGS4
+                try:
+                    groups, parse_warnings = self._parse_with_validation(filepath, filename)
+                    file_warnings.extend(parse_warnings)
+                except Exception as e:
+                    raise Exception(f"AGS4 parser failed: {e}")
             
             # Store warnings if any
             if file_warnings:
@@ -141,6 +152,11 @@ class AGSProcessor:
                 else:
                     self.tables[group_name] = df.copy()
                     
+            # Store version info
+            if not hasattr(self, 'file_versions'):
+                self.file_versions = {}
+            self.file_versions[filename] = ags_version
+            
             return groups
             
         except Exception as e:
@@ -203,11 +219,14 @@ class AGSProcessor:
             elif current_group and headings:
                 # Data row - check length
                 if len(row) != len(headings):
-                    warnings.append(
+                    warning_msg = (
                         f"WARNING: Line {line_num} in group {current_group}: "
                         f"Row has {len(row)} items but {len(headings)} headings expected. "
                         f"Row data: {row[:min(5, len(row))]}..."
                     )
+                    if self.skip_mismatched_rows:
+                        warning_msg += " - SKIPPED"
+                    warnings.append(warning_msg)
         
         # Now call the actual parser
         try:
