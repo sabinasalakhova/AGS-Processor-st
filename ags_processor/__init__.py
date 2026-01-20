@@ -5,5 +5,6 @@ __version__ = "0.1.0"
 from .processor import AGSProcessor
 from .validator import AGSValidator
 from .exporter import AGSExporter
+from .calculations import GeotechnicalCalculations
 
-__all__ = ["AGSProcessor", "AGSValidator", "AGSExporter"]
+__all__ = ["AGSProcessor", "AGSValidator", "AGSExporter", "GeotechnicalCalculations"]

@@ -25,6 +25,7 @@ setup(
         "pandas>=1.3.0",
         "openpyxl>=3.0.0",
         "xlsxwriter>=3.0.0",
+        "streamlit>=1.28.0",
     ],
     entry_points={
         "console_scripts": [

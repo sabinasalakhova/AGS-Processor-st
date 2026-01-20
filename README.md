@@ -11,6 +11,11 @@ A comprehensive Python tool for processing AGS3 and AGS4 geotechnical data files
 - **Data Consolidation**: Merge data from multiple AGS files into a single output
 - **Error Handling**: Skip invalid files and continue processing
 - **Command-Line Interface**: Easy-to-use CLI for automation
+- **Web Interface**: Streamlit-based UI for interactive processing
+- **Geotechnical Calculations**: 
+  - Rockhead detection (soil-rock interface)
+  - Corestone identification  
+  - Q-value calculation (NGI rock mass classification)
 - **Example Files**: Sample AGS files included for testing
 
 ## Installation
@@ -30,8 +35,25 @@ pip install -e .
 - pandas >= 1.3.0
 - openpyxl >= 3.0.0
 - xlsxwriter >= 3.0.0
+- streamlit >= 1.28.0 (for web UI)
 
 ## Quick Start
+
+### Web Interface (Streamlit)
+
+Launch the interactive web application:
+
+```bash
+streamlit run app.py
+```
+
+The app will open in your browser with features for:
+- File upload and processing
+- Real-time validation
+- Interactive data exploration
+- One-click export to Excel/CSV
+
+See [STREAMLIT_README.md](STREAMLIT_README.md) for detailed UI documentation.
 
 ### Command Line Usage
 
@@ -62,12 +84,13 @@ ags-processor input.ags -o output_dir -f csv
 ### Python API Usage
 
 ```python
-from ags_processor import AGSProcessor, AGSValidator, AGSExporter
+from ags_processor import AGSProcessor, AGSValidator, AGSExporter, GeotechnicalCalculations
 
 # Initialize components
 processor = AGSProcessor()
 validator = AGSValidator()
 exporter = AGSExporter()
+calc = GeotechnicalCalculations()
 
 # Read AGS files
 file_data = processor.read_file('input.ags')
@@ -85,6 +108,21 @@ if validation_result['valid']:
     print("File is valid!")
 else:
     print("Errors:", validation_result['errors'])
+
+# Geotechnical calculations
+if 'GEOL' in tables:
+    # Detect rockhead
+    rockhead_depths = calc.detect_rockhead(tables['GEOL'])
+    print(f"Rockhead depths: {rockhead_depths}")
+    
+    # Identify corestones
+    corestones = calc.detect_corestones(tables['GEOL'], min_thickness=0.5)
+    print(f"Found {len(corestones)} corestones")
+    
+# Calculate Q-value
+q_value = calc.calculate_q_value(rqd=90, jn=3, jr=3, ja=1, jw=1, srf=1)
+quality = calc.interpret_q_value(q_value)
+print(f"Q-value: {q_value:.2f} ({quality})")
 
 # Export to Excel
 exporter.export_to_excel(tables, 'output.xlsx')
