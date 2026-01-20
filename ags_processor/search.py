@@ -218,7 +218,7 @@ def match_soil_types(df_in, soil_type_list, grain_size_list):
             df.loc[
                 ((df['GEOL_DESC'].str.contains(str(gs), case=True, na=False) | 
                   df['GEOL'].str.contains(str(gs), case=True, na=False) | 
-                  df['Details'].str.contains(str(gs), case=False, na=False)) & 
+                  df['Details'].str.contains(str(gs), case=True, na=False)) & 
                  df['Grain Size'].isna()), 
                 col_name
             ] = str(gs)

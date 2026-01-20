@@ -87,7 +87,7 @@ def generate_triaxial_table(groups: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     if not trix.empty:
         tri_res = trix.copy()
     if not tret.empty:
-        tri_res = tri_res.append(tret.copy(), ignore_index=True) if not tri_res.empty else tret.copy()
+        tri_res = pd.concat([tri_res, tret.copy()], ignore_index=True) if not tri_res.empty else tret.copy()
 
     # Coalesce expected result columns -> unified names
     if not tri_res.empty:

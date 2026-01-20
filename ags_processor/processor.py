@@ -292,7 +292,9 @@ def AGS4_to_dataframe(filepath_or_buffer, encoding='utf-8'):
     for key in data:
         try:
             table = pd.DataFrame(data[key])
-            table[1:] = table[1:].apply(pd.to_numeric, errors='ignore')
+            # Only apply numeric conversion if table has more than one row
+            if len(table) > 1:
+                table[1:] = table[1:].apply(pd.to_numeric, errors='ignore')
             df[key] = table
         except ValueError:
             print(f'Warning: {key} is not exported')

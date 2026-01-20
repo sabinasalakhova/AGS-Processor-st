@@ -45,8 +45,8 @@ def drop_singleton_rows(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     # Treat empty strings and whitespace as NaN
-    pd.set_option('future.no_silent_downcasting', True)
-    clean = df.replace(r"^\s*$", np.nan, regex=True).infer_objects(copy=False)
+    with pd.option_context('future.no_silent_downcasting', True):
+        clean = df.replace(r"^\s*$", np.nan, regex=True).infer_objects(copy=False)
     nn = clean.notna().sum(axis=1)
     return df.loc[nn > 1].reset_index(drop=True)
 
