@@ -1,0 +1,251 @@
+from typing import Dict, Tuple
+import numpy as np
+import pandas as pd
+
+
+from cleaners import coalesce_columns, to_numeric_safe, drop_singleton_rows, deduplicate_cell, expand_rows
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Core Table Builder
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def generate_triaxial_table(groups: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Build a single triaxial summary table from available AGS groups:
+    - SAMP / CLSS (optional)
+    - TRIG (total stress general) or TREG (effective stress general)
+    - TRIX (AGS3 results) or TRET (AGS4 results)
+    """
+    # Get groups by priority
+    samp = groups.get("SAMP", pd.DataFrame()).copy()
+    clss = groups.get("CLSS", pd.DataFrame()).copy()
+    trig = groups.get("TRIG", pd.DataFrame()).copy()  # total stress general
+    treg = groups.get("TREG", pd.DataFrame()).copy()  # effective stress general
+    trix = groups.get("TRIX", pd.DataFrame()).copy()  # AGS3 results
+    tret = groups.get("TRET", pd.DataFrame()).copy()  # AGS4 results
+
+    # Normalize key columns for joins
+    for df in [samp, clss, trig, treg, trix, tret]:
+        if df.empty:
+            continue
+        if "HOLE_ID" not in df.columns:
+            df["HOLE_ID"] = np.nan
+        # Normalize SPEC_DEPTH spelling
+        rename_map = {c: "SPEC_DEPTH" for c in df.columns if c.upper() in {"SPEC_DPTH", "SPEC_DEPTH"}}
+        df.rename(columns=rename_map, inplace=True)
+    
+        # Ensure HOLE_ID is string
+        if "HOLE_ID" in df.columns:
+            df["HOLE_ID"] = df["HOLE_ID"].astype(str)
+
+
+    # Merge keys
+    merge_keys = ["HOLE_ID"]
+    if not samp.empty and "SPEC_DEPTH" in samp.columns:
+        merge_keys.append("SPEC_DEPTH")
+
+    merged = samp.copy() if not samp.empty else pd.DataFrame(columns=merge_keys).copy()
+
+    # add CLSS (outer)
+    if not clss.empty:
+        merged = pd.merge(merged, clss, on=merge_keys, how="outer", suffixes=("", "_CLSS"))
+
+    # add TRIG/TREG type info
+    ty_cols = []
+    if not trig.empty:
+        keep = [c for c in ["HOLE_ID", "SPEC_DEPTH", "TRIG_TYPE"] if c in trig.columns]
+        trig_f = trig[keep].copy()
+        merged = pd.merge(merged, trig_f, on=[c for c in keep if c in merge_keys], how="outer")
+        ty_cols.append("TRIG_TYPE")
+    if not treg.empty:
+        keep = [c for c in ["HOLE_ID", "SPEC_DEPTH", "TREG_TYPE"] if c in treg.columns]
+        treg_f = treg[keep].copy()
+        merged = pd.merge(merged, treg_f, on=[c for c in keep if c in merge_keys], how="outer")
+        ty_cols.append("TREG_TYPE")
+
+    # add TRIX/TRET result data (outer)
+    tri_res = pd.DataFrame()
+    if not trix.empty:
+        tri_res = trix.copy()
+    if not tret.empty:
+        tri_res = tri_res.append(tret.copy(), ignore_index=True) if not tri_res.empty else tret.copy()
+
+    # Coalesce expected result columns -> unified names
+    if not tri_res.empty:
+        coalesce_columns(tri_res, ["SPEC_DEPTH", "SPEC_DPTH"], "SPEC_DEPTH")
+        coalesce_columns(tri_res, ["HOLE_ID", "LOCA_ID"], "HOLE_ID")
+        coalesce_columns(tri_res, ["TRIX_CELL", "TRET_CELL"], "CELL")     # σ3 total cell pressure during shear
+        coalesce_columns(tri_res, ["TRIX_DEVF", "TRET_DEVF"], "DEVF")     # deviator at failure (q)
+        coalesce_columns(tri_res, ["TRIX_PWPF", "TRET_PWPF"], "PWPF")     # porewater u at failure
+        tri_keep = [c for c in ["HOLE_ID", "SPEC_DEPTH", "CELL", "DEVF", "PWPF", "SOURCE_FILE"] if c in tri_res.columns]
+        tri_res = tri_res[tri_keep].copy()
+        merged = pd.merge(merged, tri_res, on=[c for c in ["HOLE_ID", "SPEC_DEPTH"] if c in merged.columns], how="outer")
+
+    # Final column subset (add useful identifiers if present)
+    cols_pref = [
+        "HOLE_ID", "SAMP_ID", "SAMP_REF", "SAMP_TOP",
+        "SPEC_REF", "SPEC_DEPTH", "SAMP_DESC", "SPEC_DESC", "GEOL_STAT",
+        "TRIG_TYPE", "TREG_TYPE",  # test types
+        "CELL", "DEVF", "PWPF", "SOURCE_FILE"
+    ]
+    final_cols = [c for c in cols_pref if c in merged.columns]
+    final_df = merged[final_cols].copy() if final_cols else merged.copy()
+
+    # Deduplicate cell text and expand rows if any " | "
+    final_df = final_df.map(deduplicate_cell)
+    expanded_df = expand_rows(final_df)
+
+    # Drop rows that are effectively empty (<=1 non-null)
+    expanded_df = drop_singleton_rows(expanded_df)
+
+    # Numeric cast for core fields
+    to_numeric_safe(expanded_df, ["SPEC_DEPTH", "CELL", "DEVF", "PWPF"])
+
+    return expanded_df
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Lithology Mapping
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def generate_triaxial_with_lithology(groups: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Builds triaxial summary table and maps lithology from GIU group based on depth ranges.
+    Optimized for large GIU files by grouping intervals by HOLE_ID.
+    """
+    triaxial_df = generate_triaxial_table(groups)
+    giu = groups.get("GIU", pd.DataFrame()).copy()
+
+    if giu.empty or "HOLE_ID" not in giu.columns:
+        triaxial_df["LITHOLOGY"] = None
+        return triaxial_df
+
+    coalesce_columns(giu, ["DEPTH_FROM", "START_DEPTH"], "DEPTH_FROM")
+    coalesce_columns(giu, ["DEPTH_TO", "END_DEPTH"], "DEPTH_TO")
+    coalesce_columns(giu, ["GEOL_DESC", "GEOL_GEOL", "GEOL_GEO2"], "LITHOLOGY")
+    to_numeric_safe(giu, ["DEPTH_FROM", "DEPTH_TO"])
+
+    giu_by_hole = {
+        hole: df.dropna(subset=["DEPTH_FROM", "DEPTH_TO"])
+        for hole, df in giu.groupby("HOLE_ID")
+    }
+
+    def map_litho(row):
+        hole = row.get("HOLE_ID")
+        depth = row.get("SPEC_DEPTH")
+        if pd.isna(hole) or pd.isna(depth):
+            return None
+        giu_rows = giu_by_hole.get(hole)
+        if giu_rows is None:
+            return None
+        match = giu_rows[
+            (giu_rows["DEPTH_FROM"] <= depth) &
+            (giu_rows["DEPTH_TO"] >= depth)
+        ]
+        return match["LITHOLOGY"].iloc[0] if not match.empty else None
+
+    triaxial_df["LITHOLOGY"] = triaxial_df.apply(map_litho, axis=1)
+    return triaxial_df
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# s–t Value Calculation
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def calculate_s_t_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute s and t for triaxial tests, preferring effective stresses when PWPF is present.
+    Returns a new DataFrame with computed columns and a source flag for s:
+      - SIGMA_1, SIGMA_3 (total)
+      - SIGMA_1_EFF, SIGMA_3_EFF (effective; NaN if PWPF missing)
+      - s_total, s_effective
+      - s (chosen value) and s_source ("effective" or "total")
+      - t (shear = DEVF/2)
+      - valid (boolean)
+    The function coalesces common AGS names into canonical columns, converts to numeric,
+    and returns only columns useful for merging/plotting.
+    """
+    # operate on a copy to avoid mutating caller's DataFrame
+    df = df.copy()
+
+    # Coalesce expected alternate column names into canonical names.
+    # Replace these helpers with your project utilities if available.
+    def _coalesce(src_df, candidates, target):
+        for c in candidates:
+            if c in src_df.columns:
+                src_df[target] = src_df.get(target).combine_first(src_df[c]) if target in src_df.columns else src_df[c]
+        return src_df
+
+    _coalesce(df, ["TRIX_CELL", "TRET_CELL", "CELL"], "CELL")
+    _coalesce(df, ["TRIX_DEVF", "TRET_DEVF", "DEVF"], "DEVF")
+    _coalesce(df, ["TRIX_PWPF", "TRET_PWPF", "PWPF"], "PWPF")
+
+    # Safe numeric conversion
+    for col in ["CELL", "DEVF", "PWPF"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Compute total principal stresses
+    # SIGMA_1 = DEVF + CELL ; SIGMA_3 = CELL
+    df["SIGMA_1"] = df.get("DEVF", 0.0) + df.get("CELL", 0.0)
+    df["SIGMA_3"] = df.get("CELL", 0.0)
+
+    # Compute effective stresses where PWPF is available (will be NaN if PWPF is NaN)
+    df["SIGMA_1_EFF"] = df["SIGMA_1"] - df.get("PWPF")
+    df["SIGMA_3_EFF"] = df["SIGMA_3"] - df.get("PWPF")
+
+    # s and t (total and effective)
+    df["s_total"]     = 0.5 * (df["SIGMA_1"] + df["SIGMA_3"])
+    df["s_effective"] = 0.5 * (df["SIGMA_1_EFF"] + df["SIGMA_3_EFF"])
+    df["t"]           = 0.5 * (df["SIGMA_1"] - df["SIGMA_3"])  # equal to DEVF/2 when values present
+
+    # Choose s: use effective if both SIGMA_1_EFF and SIGMA_3_EFF are finite; else fall back to total
+    has_eff = np.isfinite(df[["SIGMA_1_EFF", "SIGMA_3_EFF"]]).all(axis=1)
+    df["s"] = df["s_effective"].where(has_eff, df["s_total"])
+    df["s_source"] = np.where(has_eff, "effective", "total")
+
+    # Validity flag for downstream filtering
+    df["valid"] = np.isfinite(df[["s", "t"]]).all(axis=1)
+
+    # Prepare output columns (include merge keys present in input)
+    merge_cols = [c for c in ["HOLE_ID", "SPEC_DEPTH", "CELL", "PWPF", "DEVF"] if c in df.columns]
+    out_cols = merge_cols + [
+        "SIGMA_1", "SIGMA_3", "SIGMA_1_EFF", "SIGMA_3_EFF",
+        "s_total", "s_effective", "s", "s_source", "t", "valid"
+    ]
+
+    # Preserve TEST_TYPE, SOURCE_FILE, LITH if present
+    for extra in ("TEST_TYPE", "SOURCE_FILE", "LITH"):
+        if extra in df.columns:
+            out_cols.append(extra)
+
+    return df.loc[:, [c for c in out_cols if c in df.columns]]
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Deduplication
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def remove_duplicate_tests(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Removes duplicate triaxial test rows based on key identifiers.
+    """
+    if df.empty:
+        return df
+
+    key_cols = [
+        'HOLE_ID', 'SPEC_DEPTH', 'CELL', 'DEVF', 'PWPF',
+        'TEST_TYPE', 'SOURCE_FILE'
+    ]
+    available_cols = [col for col in key_cols if col in df.columns]
+
+    if len(available_cols) >= 3:
+        temp_df = df[available_cols].copy()
+        for col in temp_df.columns:
+            if pd.api.types.is_float_dtype(temp_df[col]):
+                temp_df[col] = temp_df[col].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "")
+            else:
+                temp_df[col] = temp_df[col].astype(str)
+
+        temp_df['combined'] = temp_df.apply(lambda row: '|'.join(row.values), axis=1)
+        mask = ~temp_df.duplicated(subset=['combined'], keep='first')
+        df = df[mask].reset_index(drop=True)
+
+    return df
