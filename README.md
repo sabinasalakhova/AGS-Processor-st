@@ -274,11 +274,31 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 MIT License
 
+## Legacy Source Code
+
+The `legacy/` directory contains the **original, unmodified source files** from the three repositories that were integrated into this project:
+
+- **legacy/AGS-Processor/** - Original files from [sabinasalakhova/AGS-Processor](https://github.com/sabinasalakhova/AGS-Processor)
+  - Core AGS processing functions (ags_core.py)
+  - Original Streamlit apps and utilities
+  - 13 Python files + documentation
+
+- **legacy/ags3_all_data_to_excel/** - Original files from [sabinasalakhova/ags3_all_data_to_excel](https://github.com/sabinasalakhova/ags3_all_data_to_excel)
+  - AGS3 parser (ags_3_reader.py)
+  - Primary AGS3 file reading implementation
+
+- **legacy/agsfileanalysis/** - Original files from [sabinasalakhova/agsfileanalysis](https://github.com/sabinasalakhova/agsfileanalysis)
+  - Triaxial test processing (triaxial.py)
+  - Data cleaning utilities (cleaners.py)
+  - AGS parsing and Excel utilities
+
+These files are preserved for reference, attribution, and comparison. See `legacy/README.md` for details on what was integrated and how.
+
 ## Acknowledgments
 
-This project consolidates functionality from:
+This project integrates and modernizes functionality from:
 - sabinasalakhova/AGS-Processor
 - sabinasalakhova/agsfileanalysis  
 - sabinasalakhova/ags3_all_data_to_excel
 
-Built with the excellent [python-ags4](https://pypi.org/project/python-AGS4/) library by the AGS Data Format Working Group.
+All original source files are preserved in the `legacy/` directory with proper attribution.
