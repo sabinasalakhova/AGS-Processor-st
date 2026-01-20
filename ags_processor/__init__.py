@@ -2,6 +2,9 @@
 
 __version__ = "0.1.0"
 
+# Import core processor class
+from .processor import AGSProcessor
+
 # Import legacy modules
 from .validator import AGSValidator
 from .exporter import AGSExporter
@@ -15,6 +18,7 @@ from . import search
 from . import combiners
 
 __all__ = [
+    "AGSProcessor",
     "AGSValidator", 
     "AGSExporter", 
     "GeotechnicalCalculations",

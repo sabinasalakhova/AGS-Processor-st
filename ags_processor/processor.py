@@ -452,3 +452,173 @@ def write_groups_to_excel(groups: Dict[str, pd.DataFrame], output_path: Path):
         logger.info("Successfully created Excel file.")
     except Exception as e:
         logger.error(f"Failed to write Excel file: {e}")
+
+
+# ============================================================================
+# AGS PROCESSOR CLASS
+# ============================================================================
+
+class AGSProcessor:
+    """
+    Main AGS file processor class that provides a unified interface for
+    parsing and managing AGS files.
+    
+    This class wraps the legacy parsing functions and provides a stateful
+    interface for processing multiple files and tracking results.
+    """
+    
+    def __init__(self):
+        """Initialize the AGS processor."""
+        self.tables = {}
+        self.file_data = {}
+        self.errors = {}
+        self.processed_files = []
+        
+    def clear(self):
+        """Clear all processed data."""
+        self.tables = {}
+        self.file_data = {}
+        self.errors = {}
+        self.processed_files = []
+        
+    def read_file(self, filepath: str, prefix_hole_id: bool = False) -> Dict[str, pd.DataFrame]:
+        """
+        Read a single AGS file.
+        
+        Parameters
+        ----------
+        filepath : str
+            Path to the AGS file
+        prefix_hole_id : bool, optional
+            Whether to prefix HOLE_ID with first 5 chars of filename
+            
+        Returns
+        -------
+        dict
+            Dictionary of group name -> DataFrame
+        """
+        try:
+            # Use the primary parser
+            groups = parse_ags_file(filepath, prefix_hole_id=prefix_hole_id)
+            
+            # Store the data
+            filename = Path(filepath).name
+            self.file_data[filename] = groups
+            self.processed_files.append(filename)
+            
+            # Merge into tables
+            for group_name, df in groups.items():
+                if group_name in self.tables:
+                    # Concatenate with existing data
+                    self.tables[group_name] = pd.concat(
+                        [self.tables[group_name], df],
+                        ignore_index=True
+                    )
+                else:
+                    self.tables[group_name] = df.copy()
+                    
+            return groups
+            
+        except Exception as e:
+            self.errors[filepath] = [str(e)]
+            logger.error(f"Error reading {filepath}: {e}")
+            return {}
+            
+    def read_multiple_files(self, filepaths: List[str], skip_invalid: bool = True) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """
+        Read multiple AGS files.
+        
+        Parameters
+        ----------
+        filepaths : list of str
+            List of paths to AGS files
+        skip_invalid : bool, optional
+            Whether to skip files that fail to parse
+            
+        Returns
+        -------
+        dict
+            Dictionary of filename -> {group_name -> DataFrame}
+        """
+        results = {}
+        
+        for filepath in filepaths:
+            try:
+                groups = self.read_file(filepath, prefix_hole_id=True)
+                if groups:
+                    results[Path(filepath).name] = groups
+            except Exception as e:
+                if not skip_invalid:
+                    raise
+                self.errors[filepath] = [str(e)]
+                logger.warning(f"Skipped {filepath}: {e}")
+                
+        return results
+        
+    def get_all_tables(self) -> Dict[str, pd.DataFrame]:
+        """
+        Get all consolidated tables.
+        
+        Returns
+        -------
+        dict
+            Dictionary of group name -> consolidated DataFrame
+        """
+        return self.tables
+        
+    def get_table(self, group_name: str) -> Optional[pd.DataFrame]:
+        """
+        Get a specific table by group name.
+        
+        Parameters
+        ----------
+        group_name : str
+            Name of the AGS group (e.g., 'PROJ', 'LOCA', 'SAMP')
+            
+        Returns
+        -------
+        DataFrame or None
+            The requested table, or None if not found
+        """
+        return self.tables.get(group_name)
+        
+    def get_file_summary(self) -> Dict:
+        """
+        Get summary statistics about processed files.
+        
+        Returns
+        -------
+        dict
+            Summary information including total files, groups, records
+        """
+        total_records = sum(len(df) for df in self.tables.values())
+        
+        return {
+            'total_files': len(self.processed_files),
+            'total_groups': len(self.tables),
+            'total_records': total_records,
+            'group_names': list(self.tables.keys()),
+            'files': self.processed_files
+        }
+        
+    def get_errors(self) -> Dict[str, List[str]]:
+        """
+        Get any errors that occurred during processing.
+        
+        Returns
+        -------
+        dict
+            Dictionary of filepath -> list of error messages
+        """
+        return self.errors
+        
+    def get_group_names(self) -> List[str]:
+        """
+        Get list of all group names in processed data.
+        
+        Returns
+        -------
+        list
+            List of group names
+        """
+        return list(self.tables.keys())
