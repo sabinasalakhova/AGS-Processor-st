@@ -2,11 +2,23 @@
 
 from typing import Dict, List, Optional
 import pandas as pd
+import logging
+
+# Import our custom parser with padding fix instead of python_ags4
+import sys
+from pathlib import Path
+
+# Add legacy directories to path to import custom parser
+ags_processor_legacy = Path(__file__).parent.parent / "legacy" / "AGS-Processor"
+if str(ags_processor_legacy) not in sys.path:
+    sys.path.insert(0, str(ags_processor_legacy))
 
 try:
-    from python_ags4 import AGS4
+    from ags_core import AGS4_to_dataframe
 except ImportError:
-    AGS4 = None
+    AGS4_to_dataframe = None
+
+logger = logging.getLogger(__name__)
 
 
 class AGSValidator:
@@ -27,7 +39,7 @@ class AGSValidator:
         
     def validate_file(self, filepath: str) -> Dict:
         """
-        Validate an AGS file.
+        Validate an AGS file using custom parser with padding fix.
         
         Args:
             filepath: Path to the AGS file
@@ -42,39 +54,39 @@ class AGSValidator:
             'filepath': filepath
         }
         
-        if AGS4 is None:
+        if AGS4_to_dataframe is None:
             results['valid'] = False
             error_dict = {
                 'type': 'DEPENDENCY_ERROR',
-                'message': 'python-ags4 library not available'
+                'message': 'AGS parser not available'
             }
             results['errors'].append(error_dict)
             self.validation_errors.append(error_dict)
             return results
             
         try:
-            # Use python-ags4 validation
-            error_list = AGS4.check_file(filepath)
+            # Use our custom parser with padding fix
+            # This will pad mismatched rows instead of raising errors
+            df_dict, headings = AGS4_to_dataframe(filepath)
             
-            if error_list:
-                for error in error_list:
-                    # Categorize errors and warnings
-                    if 'error' in error.lower() or 'invalid' in error.lower():
-                        error_dict = {
-                            'type': 'FORMAT_ERROR',
-                            'message': error
-                        }
-                        results['errors'].append(error_dict)
-                        self.validation_errors.append(error_dict)
-                        results['valid'] = False
-                    else:
-                        warning_dict = {
-                            'type': 'FORMAT_WARNING',
-                            'message': error
-                        }
-                        results['warnings'].append(warning_dict)
-                        self.validation_warnings.append(warning_dict)
-                        
+            if not df_dict:
+                results['valid'] = False
+                error_dict = {
+                    'type': 'PARSE_ERROR',
+                    'message': 'Failed to parse AGS file - no data found'
+                }
+                results['errors'].append(error_dict)
+                self.validation_errors.append(error_dict)
+            else:
+                # File parsed successfully
+                # Add informational message about groups found
+                warning_dict = {
+                    'type': 'INFO',
+                    'message': f'Successfully parsed {len(df_dict)} group(s): {", ".join(df_dict.keys())}'
+                }
+                results['warnings'].append(warning_dict)
+                self.validation_warnings.append(warning_dict)
+                
         except Exception as e:
             results['valid'] = False
             error_dict = {

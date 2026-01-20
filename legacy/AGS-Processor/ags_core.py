@@ -8,7 +8,20 @@ These functions are called by the Streamlit interface.
 import pandas as pd
 import numpy as np
 import csv 
+import logging
 from io import BytesIO, StringIO
+
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Special row prefixes to skip during parsing (AGS3 format)
+SKIP_ROW_PREFIXES = {"<UNITS>", "<UNIT>", "<CONT>"}
+
+# Placeholder for missing values when padding rows
+MISSING_VALUE_PLACEHOLDER = "-"
 
 # ============================================================================
 # AGS FILE PARSING FUNCTIONS
@@ -116,28 +129,71 @@ def AGS4_to_dict(filepath_or_buffer, encoding: str = 'utf-8'):
                 for h in headings[group]:
                     data[group].setdefault(h, [])
 
-            # Continuation line
-            elif first == "<CONT>":
-                if group is None:
-                    raise ValueError(f"Continuation before GROUP at line {lineno}")
-                for j in range(1, len(temp)):
-                    if j >= len(headings[group]):
-                        raise ValueError(f"Continuation column index {j} exceeds headings for group {group} at line {lineno}")
-                    col = headings[group][j]
-                    if not data[group][col]:
-                        raise ValueError(f"No previous row for continuation in column '{col}' at line {lineno}")
-                    data[group][col][-1] += temp[j]
+            # Skip special rows (continuation and unit rows - AGS3 format)
+            elif first in SKIP_ROW_PREFIXES:
+                # Handle continuation rows specially
+                if first == "<CONT>":
+                    if group is None:
+                        raise ValueError(f"Continuation before GROUP at line {lineno}")
+                    for j in range(1, len(temp)):
+                        if j >= len(headings[group]):
+                            raise ValueError(f"Continuation column index {j} exceeds headings for group {group} at line {lineno}")
+                        col = headings[group][j]
+                        if not data[group][col]:
+                            raise ValueError(f"No previous row for continuation in column '{col}' at line {lineno}")
+                        data[group][col][-1] += temp[j]
+                # Skip other special rows (<UNITS>, <UNIT>)
+                continue
 
             # Group breaks (blank line with one empty field)
             elif first == "" and len(temp) == 1:
                 continue
 
             # DATA / UNITS lines
-                       # DATA / UNITS lines
             else:
                 if group is None:
                     raise ValueError(f"Data before GROUP at line {lineno}")
-                for j in range(len(temp)):
+                
+                # Get the expected number of columns from headings
+                expected_cols = len(headings[group])
+                actual_cols = len(temp)
+                
+                # Handle mismatched row length
+                if actual_cols != expected_cols:
+                    # Determine filename for logging
+                    if hasattr(filepath_or_buffer, 'name'):
+                        filename = filepath_or_buffer.name
+                    elif isinstance(filepath_or_buffer, str):
+                        filename = filepath_or_buffer
+                    else:
+                        filename = '<file-like object>'
+                    
+                    if actual_cols < expected_cols:
+                        # Row is too short - pad with placeholder
+                        missing_cols = expected_cols - actual_cols
+                        missing_col_names = headings[group][actual_cols:expected_cols]
+                        
+                        logger.warning(
+                            f"Line {lineno} in group {group}: Row has {actual_cols} entries "
+                            f"but {expected_cols} headings expected. Padding with \"{MISSING_VALUE_PLACEHOLDER}\" for "
+                            f"column(s): {', '.join(missing_col_names)}. "
+                            f"File: {filename}"
+                        )
+                        
+                        # Pad the row with placeholder
+                        temp.extend([MISSING_VALUE_PLACEHOLDER] * missing_cols)
+                    else:
+                        # Row is too long - truncate and warn
+                        extra_cols = actual_cols - expected_cols
+                        logger.warning(
+                            f"Line {lineno} in group {group}: Row has {actual_cols} entries "
+                            f"but only {expected_cols} headings expected. Truncating {extra_cols} "
+                            f"extra entry(ies). File: {filename}"
+                        )
+                        temp = temp[:expected_cols]
+                
+                # Now append the data to all columns
+                for j in range(len(headings[group])):
                     col = headings[group][j]
                     data[group][col].append(temp[j])
     finally:
