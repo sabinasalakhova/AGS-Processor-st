@@ -210,7 +210,18 @@ class AGSProcessor:
                     )
         
         # Now call the actual parser
-        df_dict, headings_dict = AGS4_to_dataframe(filepath)
+        try:
+            df_dict, headings_dict = AGS4_to_dataframe(filepath)
+        except Exception as e:
+            # If parser fails, add error to warnings
+            error_msg = str(e)
+            if "does not have the same number of entries" in error_msg:
+                # Extract line number and group from error message
+                warnings.append(f"PARSER ERROR: {error_msg}")
+            else:
+                warnings.append(f"ERROR: Failed to parse file - {error_msg}")
+            # Return empty dict if parsing fails
+            df_dict = {}
         
         return df_dict, warnings
     
@@ -333,11 +344,21 @@ class AGSProcessor:
             Summary information including total files, groups, records
         """
         total_records = sum(len(df) for df in self.tables.values())
+        total_errors = sum(len(msgs) for msgs in self.errors.values())
+        
+        # Count files by version (basic detection)
+        files_by_version = {}
+        for filename in self.processed_files:
+            # This is a simple heuristic - could be improved
+            files_by_version['AGS4'] = files_by_version.get('AGS4', 0) + 1
         
         return {
             'total_files': len(self.processed_files),
-            'total_groups': len(self.tables),
+            'total_tables': len(self.tables),  # Use 'total_tables' instead of 'total_groups'
+            'total_groups': len(self.tables),  # Keep for backwards compatibility
             'total_records': total_records,
+            'total_errors': total_errors,
+            'files_by_version': files_by_version,
             'group_names': list(self.tables.keys()),
             'files': self.processed_files
         }
