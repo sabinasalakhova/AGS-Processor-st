@@ -14,6 +14,16 @@ from io import BytesIO, StringIO
 logger = logging.getLogger(__name__)
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Special row prefixes to skip during parsing (AGS3 format)
+SKIP_ROW_PREFIXES = {"<UNITS>", "<UNIT>", "<CONT>"}
+
+# Placeholder for missing values when padding rows
+MISSING_VALUE_PLACEHOLDER = "-"
+
+# ============================================================================
 # AGS FILE PARSING FUNCTIONS
 # ============================================================================
 
@@ -119,20 +129,20 @@ def AGS4_to_dict(filepath_or_buffer, encoding: str = 'utf-8'):
                 for h in headings[group]:
                     data[group].setdefault(h, [])
 
-            # Continuation line
-            elif first == "<CONT>":
-                if group is None:
-                    raise ValueError(f"Continuation before GROUP at line {lineno}")
-                for j in range(1, len(temp)):
-                    if j >= len(headings[group]):
-                        raise ValueError(f"Continuation column index {j} exceeds headings for group {group} at line {lineno}")
-                    col = headings[group][j]
-                    if not data[group][col]:
-                        raise ValueError(f"No previous row for continuation in column '{col}' at line {lineno}")
-                    data[group][col][-1] += temp[j]
-
-            # Skip UNITS rows (AGS3 format)
-            elif first == "<UNITS>" or first == "<UNIT>":
+            # Skip special rows (continuation and unit rows - AGS3 format)
+            elif first in SKIP_ROW_PREFIXES:
+                # Handle continuation rows specially
+                if first == "<CONT>":
+                    if group is None:
+                        raise ValueError(f"Continuation before GROUP at line {lineno}")
+                    for j in range(1, len(temp)):
+                        if j >= len(headings[group]):
+                            raise ValueError(f"Continuation column index {j} exceeds headings for group {group} at line {lineno}")
+                        col = headings[group][j]
+                        if not data[group][col]:
+                            raise ValueError(f"No previous row for continuation in column '{col}' at line {lineno}")
+                        data[group][col][-1] += temp[j]
+                # Skip other special rows (<UNITS>, <UNIT>)
                 continue
 
             # Group breaks (blank line with one empty field)
@@ -159,19 +169,19 @@ def AGS4_to_dict(filepath_or_buffer, encoding: str = 'utf-8'):
                         filename = '<file-like object>'
                     
                     if actual_cols < expected_cols:
-                        # Row is too short - pad with "-"
+                        # Row is too short - pad with placeholder
                         missing_cols = expected_cols - actual_cols
                         missing_col_names = headings[group][actual_cols:expected_cols]
                         
                         logger.warning(
                             f"Line {lineno} in group {group}: Row has {actual_cols} entries "
-                            f"but {expected_cols} headings expected. Padding with \"-\" for "
+                            f"but {expected_cols} headings expected. Padding with \"{MISSING_VALUE_PLACEHOLDER}\" for "
                             f"column(s): {', '.join(missing_col_names)}. "
                             f"File: {filename}"
                         )
                         
-                        # Pad the row with "-"
-                        temp.extend(['-'] * missing_cols)
+                        # Pad the row with placeholder
+                        temp.extend([MISSING_VALUE_PLACEHOLDER] * missing_cols)
                     else:
                         # Row is too long - truncate and warn
                         extra_cols = actual_cols - expected_cols
