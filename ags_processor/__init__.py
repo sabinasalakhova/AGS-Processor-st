@@ -2,9 +2,25 @@
 
 __version__ = "0.1.0"
 
-from .processor import AGSProcessor
+# Import legacy modules
 from .validator import AGSValidator
 from .exporter import AGSExporter
 from .calculations import GeotechnicalCalculations
 
-__all__ = ["AGSProcessor", "AGSValidator", "AGSExporter", "GeotechnicalCalculations"]
+# Import new comprehensive modules
+from . import processor
+from . import triaxial
+from . import cleaners
+from . import search
+from . import combiners
+
+__all__ = [
+    "AGSValidator", 
+    "AGSExporter", 
+    "GeotechnicalCalculations",
+    "processor",
+    "triaxial",
+    "cleaners",
+    "search",
+    "combiners"
+]
