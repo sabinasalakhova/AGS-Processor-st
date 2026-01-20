@@ -225,9 +225,13 @@ def calculate_s_t_values(df: pd.DataFrame) -> pd.DataFrame:
     df["SIGMA_1"] = df.get("DEVF", 0.0) + df.get("CELL", 0.0)
     df["SIGMA_3"] = df.get("CELL", 0.0)
 
-    # Compute effective stresses where PWPF is available
-    df["SIGMA_1_EFF"] = df["SIGMA_1"] - df.get("PWPF")
-    df["SIGMA_3_EFF"] = df["SIGMA_3"] - df.get("PWPF")
+    # Compute effective stresses where PWPF is available (will be NaN if PWPF is NaN or missing)
+    if "PWPF" in df.columns:
+        df["SIGMA_1_EFF"] = df["SIGMA_1"] - df["PWPF"]
+        df["SIGMA_3_EFF"] = df["SIGMA_3"] - df["PWPF"]
+    else:
+        df["SIGMA_1_EFF"] = np.nan
+        df["SIGMA_3_EFF"] = np.nan
 
     # s and t (total and effective)
     df["s_total"]     = 0.5 * (df["SIGMA_1"] + df["SIGMA_3"])
