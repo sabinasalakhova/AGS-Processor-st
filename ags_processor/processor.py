@@ -430,11 +430,16 @@ class AGSProcessor:
         total_records = sum(len(df) for df in self.tables.values())
         total_errors = sum(len(msgs) for msgs in self.errors.values())
         
-        # Count files by version (basic detection)
+        # Count files by version using stored version info
         files_by_version = {}
-        for filename in self.processed_files:
-            # This is a simple heuristic - could be improved
-            files_by_version['AGS4'] = files_by_version.get('AGS4', 0) + 1
+        if hasattr(self, 'file_versions'):
+            for filename in self.processed_files:
+                version = self.file_versions.get(filename, 'AGS4')
+                files_by_version[version] = files_by_version.get(version, 0) + 1
+        else:
+            # Fallback if file_versions not available
+            for filename in self.processed_files:
+                files_by_version['AGS4'] = files_by_version.get('AGS4', 0) + 1
         
         return {
             'total_files': len(self.processed_files),
