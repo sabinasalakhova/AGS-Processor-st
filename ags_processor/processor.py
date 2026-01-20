@@ -7,8 +7,10 @@ Re-exports parsing functions from legacy files and provides AGSProcessor wrapper
 """
 
 import sys
+import csv
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from io import StringIO
 import pandas as pd
 import logging
 
@@ -75,7 +77,7 @@ class AGSProcessor:
         
     def read_file(self, filepath, prefix_hole_id: bool = False) -> Dict[str, pd.DataFrame]:
         """
-        Read a single AGS file using legacy parsers.
+        Read a single AGS file using legacy parsers with enhanced validation.
         
         Parameters
         ----------
@@ -91,11 +93,13 @@ class AGSProcessor:
         """
         try:
             filename = Path(filepath).name if hasattr(filepath, '__fspath__') or isinstance(filepath, str) else 'uploaded_file'
+            file_warnings = []
             
             # Try AGS4_to_dataframe first (handles both AGS3 and AGS4)
             try:
-                df_dict, headings = AGS4_to_dataframe(filepath)
-                groups = df_dict
+                # Wrap the call to validate row/heading mismatches
+                groups, parse_warnings = self._parse_with_validation(filepath, 'AGS4_to_dataframe')
+                file_warnings.extend(parse_warnings)
             except Exception as e1:
                 # Fallback to parse_ags_file for AGS3
                 try:
@@ -110,9 +114,16 @@ class AGSProcessor:
                     else:
                         raise ValueError(f"Invalid filepath type: {type(filepath)}")
                     
-                    groups = parse_ags_file(file_bytes)
+                    groups, parse_warnings = self._parse_ags3_with_validation(file_bytes)
+                    file_warnings.extend(parse_warnings)
                 except Exception as e2:
                     raise Exception(f"Both parsers failed. AGS4_to_dataframe: {e1}, parse_ags_file: {e2}")
+            
+            # Store warnings if any
+            if file_warnings:
+                if filename not in self.errors:
+                    self.errors[filename] = []
+                self.errors[filename].extend(file_warnings)
             
             # Store the data
             self.file_data[filename] = groups
@@ -137,6 +148,120 @@ class AGSProcessor:
             self.errors[filepath_str] = [str(e)]
             logger.error(f"Error reading {filepath_str}: {e}")
             return {}
+    
+    def _parse_with_validation(self, filepath, parser_name='AGS4_to_dataframe'):
+        """
+        Parse AGS file and validate row/heading consistency.
+        
+        Returns
+        -------
+        tuple
+            (groups dict, warnings list)
+        """
+        import csv
+        from io import StringIO
+        
+        warnings = []
+        
+        # First, do a validation pass to detect mismatches
+        if isinstance(filepath, (str, Path)):
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        elif hasattr(filepath, 'read'):
+            if hasattr(filepath, 'seek'):
+                filepath.seek(0)
+            content = filepath.read()
+            if isinstance(content, bytes):
+                content = content.decode('utf-8', errors='replace')
+            if hasattr(filepath, 'seek'):
+                filepath.seek(0)
+        else:
+            content = str(filepath)
+        
+        # Parse and validate
+        reader = csv.reader(StringIO(content), delimiter=',', quotechar='"')
+        current_group = None
+        headings = []
+        line_num = 0
+        
+        for row in reader:
+            line_num += 1
+            if not row or len(row) == 0:
+                continue
+            
+            first = row[0]
+            
+            if first.startswith('**'):
+                current_group = first[2:]
+                headings = []
+            elif first.startswith('*'):
+                # Heading row
+                headings.extend([h[1:] for h in row])
+            elif first == '<CONT>':
+                # Continuation line
+                continue
+            elif current_group and headings:
+                # Data row - check length
+                if len(row) != len(headings):
+                    warnings.append(
+                        f"WARNING: Line {line_num} in group {current_group}: "
+                        f"Row has {len(row)} items but {len(headings)} headings expected. "
+                        f"Row data: {row[:min(5, len(row))]}..."
+                    )
+        
+        # Now call the actual parser
+        df_dict, headings_dict = AGS4_to_dataframe(filepath)
+        
+        return df_dict, warnings
+    
+    def _parse_ags3_with_validation(self, file_bytes):
+        """
+        Parse AGS3 file and validate row/heading consistency.
+        
+        Returns
+        -------
+        tuple
+            (groups dict, warnings list)
+        """
+        warnings = []
+        text = file_bytes.decode("latin-1", errors="ignore")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        
+        current_group = None
+        headings = []
+        line_num = 0
+        
+        import re
+        def _split_line(line: str):
+            parts = re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', line)
+            return [p.strip().strip('"') for p in parts]
+        
+        for line in lines:
+            line_num += 1
+            parts = _split_line(line)
+            first_field = parts[0]
+            
+            if first_field.startswith("**"):
+                current_group = first_field.strip("*?")
+                headings = []
+            elif first_field.startswith("*"):
+                new_headings = [h.lstrip("*?") for h in parts]
+                headings.extend(new_headings)
+            elif first_field == "<UNITS>" or first_field == "<CONT>":
+                continue
+            elif current_group and headings and parts:
+                # Data row - check length
+                if len(parts) != len(headings):
+                    warnings.append(
+                        f"WARNING: Line {line_num} in group {current_group}: "
+                        f"Row has {len(parts)} items but {len(headings)} headings expected. "
+                        f"Row data: {parts[:min(5, len(parts))]}..."
+                    )
+        
+        # Now call the actual parser
+        groups = parse_ags_file(file_bytes)
+        
+        return groups, warnings
             
     def read_multiple_files(self, filepaths: List, skip_invalid: bool = True) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
