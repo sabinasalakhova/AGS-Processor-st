@@ -165,6 +165,67 @@ class AGSProcessor:
             logger.error(f"Error reading {filepath_str}: {e}")
             return {}
     
+    def _detect_ags_version(self, filepath) -> str:
+        """
+        Detect whether file is AGS3 or AGS4 format.
+        
+        AGS3 uses:
+        - **GROUP for group headers
+        - *HEADING for column names
+        - <UNITS> for units
+        
+        AGS4 uses:
+        - "GROUP" keyword in first column
+        - "HEADING" keyword in first column
+        - "UNIT" keyword in first column
+        
+        Parameters
+        ----------
+        filepath : str or file-like
+            Path to file or file-like object
+            
+        Returns
+        -------
+        str
+            'AGS3' or 'AGS4'
+        """
+        try:
+            # Read first few lines to check format
+            if isinstance(filepath, (str, Path)):
+                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                    lines = [f.readline() for _ in range(10)]
+            elif hasattr(filepath, 'read'):
+                if hasattr(filepath, 'seek'):
+                    filepath.seek(0)
+                content = filepath.read()
+                if isinstance(content, bytes):
+                    content = content.decode('utf-8', errors='replace')
+                if hasattr(filepath, 'seek'):
+                    filepath.seek(0)
+                lines = content.split('\n')[:10]
+            else:
+                return 'AGS4'  # Default
+            
+            # Check for AGS3 markers
+            for line in lines:
+                line = line.strip()
+                if line.startswith('**'):
+                    # **GROUP marker indicates AGS3
+                    return 'AGS3'
+                if line.startswith('*') and not line.startswith('**'):
+                    # *HEADING marker indicates AGS3
+                    return 'AGS3'
+                if line.startswith('<UNITS>') or line.startswith('<UNIT>'):
+                    # <UNITS> marker indicates AGS3
+                    return 'AGS3'
+            
+            # If no AGS3 markers found, assume AGS4
+            return 'AGS4'
+            
+        except Exception as e:
+            logger.warning(f"Error detecting AGS version, defaulting to AGS4: {e}")
+            return 'AGS4'
+    
     def _parse_with_validation(self, filepath, parser_name='AGS4_to_dataframe'):
         """
         Parse AGS file and validate row/heading consistency.
